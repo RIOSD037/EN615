@@ -1,0 +1,341 @@
+---
+title: "EN615 Module 1"
+author: "Dan RD"
+date: "2026-05-24"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+library(ggplot2)
+library(tinytex)
+library(deSolve)
+library(knitr)
+
+```
+
+## Fractal
+
+Consider the "simple" non-autonomous IVP: 
+
+$$
+\frac{dy}{dt} = t - y^2,\quad y(0)=1
+$$
+Use Euler's method with $h=0.05$ and $t = 900$ to plot $t$ vs. $y$.
+
+```{Eulers method}
+## Use Euler's method to solve dy/dt = t - y^2, y(0) = 1 from t=0 to t = 900 and plot t vs y
+
+h  <- 0.05
+t0 <- 0
+tf <- 900
+
+# number of steps
+N <- as.integer((tf - t0)/h)
+
+# Allocate vectors
+t <- numeric(N+1)
+y <- numeric(N+1)
+
+# Initial conditions
+t[1] <- t0
+y[1] <- 1
+
+# Euler iteration 
+
+for (n in 1:N) {
+  t[n+1] <- t[n] + h
+  y[n+1] <- y[n] + h * (t[n] - y[n]^2)
+}
+
+```
+
+
+```{r euler-plot, echo = FALSE, fig.align='center', out.width='100%'}
+# Use ggplot() to build your chart
+
+h  <- 0.05
+t0 <- 0
+tf <- 900
+
+# number of steps
+N <- as.integer((tf - t0)/h)
+
+# Allocate vectors
+t <- numeric(N+1)
+y <- numeric(N+1)
+
+# Initial conditions
+t[1] <- t0
+y[1] <- 1
+
+# Euler iteration 
+
+for (n in 1:N) {
+  t[n+1] <- t[n] + h
+  y[n+1] <- y[n] + h * (t[n] - y[n]^2)
+}
+
+df <- data.frame(t = t, y = y)
+
+ggplot(df, aes(t, y)) +
+  geom_line(linewidth = 0.3, color = "steelblue") +
+  labs(
+    title = "Euler: dy/dt = t - y^2,  y(0)=1  (h=0.05)",
+    x = "t", y = "y"
+  ) +
+  theme_minimal(base_size = 12, base_family = "sans") +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold", size = 14)
+  )
+```
+
+
+## Chaos
+
+Consider the "simple" non-autonomous differential equation: 
+
+$$
+\frac{dy}{dt} = exp(t)\sin(y)
+$$
+
+a) sketch the graph of the solution that satisfies the IC $y(0) = 0.3$
+
+```{r exp-plot, echo = FALSE, fig.align='center', out.width='100%'}
+# --- (A) Build a direction field in (t, y) ---
+t_range <- c(0, 4)              # adjust as desired
+y_range <- c(0, 4)              # covers up to a bit above pi (~3.1416)
+
+nt <- 25
+ny <- 25
+
+grid <- expand.grid(
+  t = seq(t_range[1], t_range[2], length.out = nt),
+  y = seq(y_range[1], y_range[2], length.out = ny)
+)
+
+# slope dy/dt
+grid$slope <- exp(grid$t) * sin(grid$y)
+
+# Convert slope field to short line segments:
+# direction vector (dt, dy) = (1, slope), normalized for uniform segment length
+L <- 0.18  # segment half-length; tweak for density/appearance
+
+norm <- sqrt(1 + grid$slope^2)
+grid$dt <- (1 / norm) * L
+grid$dy <- (grid$slope / norm) * L
+
+grid$t0 <- grid$t - grid$dt
+grid$t1 <- grid$t + grid$dt
+grid$y0 <- grid$y - grid$dy
+grid$y1 <- grid$y + grid$dy
+
+# --- (B) Numerically trace the solution through (0, 0.3) ---
+f <- function(t, state, parms) {
+  y <- state[1]
+  list(exp(t) * sin(y))
+}
+
+times <- seq(t_range[1], t_range[2], by = 0.01)
+sol <- ode(y = c(0.3), times = times, func = f, parms = NULL)
+sol <- as.data.frame(sol)
+names(sol) <- c("t", "y")
+
+# --- (C) Plot ---
+ggplot() +
+  geom_segment(
+    data = grid,
+    aes(x = t0, y = y0, xend = t1, yend = y1),
+    linewidth = 0.25,
+    alpha = 0.6
+  ) +
+  geom_line(
+    data = sol,
+    aes(x = t, y = y),
+    linewidth = 1.0,
+    color = "blue"
+  ) +
+  geom_hline(yintercept = pi, linetype = "dashed", color = "red") +
+  coord_cartesian(xlim = t_range, ylim = y_range) +
+  labs(
+    title = "Direction Field and Solution for y' = e^t sin(y),  y(0)=0.3",
+    x = "t",
+    y = "y"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold")
+  )
+```
+
+b) Use the Range-Kutta method with step size $\Delta t = 0.3, \Delta t= 0.301$ and $\Delta t = .302$
+
+```{RK4 Rk4-method}
+f <- function(t, y) exp(t) * sin(y)
+
+rk4_step <- function(t, y, h) {
+  k1 <- f(t, y)
+  k2 <- f(t + h/2, y + h*k1/2)
+  k3 <- f(t + h/2, y + h*k2/2)
+  k4 <- f(t + h,   y + h*k3)
+  y + (h/6) * (k1 + 2*k2 + 2*k3 + k4)
+}
+
+# -----------------------------
+# Time grid: 0, 0.3, ..., 9.9, 10.0
+# -----------------------------
+times <- c(seq(0, 9.9, by = 0.3), 10)
+
+# -----------------------------
+# Function to run RK4 over 'times'
+# -----------------------------
+rk4_path <- function(y0, times) {
+  y <- numeric(length(times))
+  y[1] <- y0
+  for (i in 1:(length(times) - 1)) {
+    t <- times[i]
+    h <- times[i + 1] - times[i]   # 0.3 except last step 0.1
+    y[i + 1] <- rk4_step(t, y[i], h)
+  }
+  y
+}
+
+# -----------------------------
+# Compute 3 paths for 3 initial conditions
+# -----------------------------
+y_0300 <- rk4_path(0.300, times)
+y_0301 <- rk4_path(0.301, times)
+y_0302 <- rk4_path(0.302, times)
+
+# -----------------------------
+# Data frame with time + 3 columns
+# -----------------------------
+df <- data.frame(
+  time   = times,
+  y_0300 = y_0300,
+  y_0301 = y_0301,
+  y_0302 = y_0302
+)
+
+```
+
+```{r, echo= FALSE, results='asis'}
+
+f <- function(t, y) exp(t) * sin(y)
+
+rk4_step <- function(t, y, h) {
+  k1 <- f(t, y)
+  k2 <- f(t + h/2, y + h*k1/2)
+  k3 <- f(t + h/2, y + h*k2/2)
+  k4 <- f(t + h,   y + h*k3)
+  y + (h/6) * (k1 + 2*k2 + 2*k3 + k4)
+}
+
+# -----------------------------
+# Time grid: 0, 0.3, ..., 9.9, 10.0
+# -----------------------------
+times <- c(seq(0, 9.9, by = 0.3), 10)
+
+# -----------------------------
+# Function to run RK4 over 'times'
+# -----------------------------
+rk4_path <- function(y0, times) {
+  y <- numeric(length(times))
+  y[1] <- y0
+  for (i in 1:(length(times) - 1)) {
+    t <- times[i]
+    h <- times[i + 1] - times[i]   # 0.3 except last step 0.1
+    y[i + 1] <- rk4_step(t, y[i], h)
+  }
+  y
+}
+
+# -----------------------------
+# Compute 3 paths for 3 initial conditions
+# -----------------------------
+y_0300 <- rk4_path(0.300, times)
+y_0301 <- rk4_path(0.301, times)
+y_0302 <- rk4_path(0.302, times)
+
+# -----------------------------
+# Data frame with time + 3 columns
+# -----------------------------
+df <- data.frame(
+  time   = times,
+  y_0300 = y_0300,
+  y_0301 = y_0301,
+  y_0302 = y_0302
+)
+
+knitr::kable(df)
+
+```
+
+```{r rk4-plot, echo = FALSE, fig.align='center', out.width='100%'}
+f <- function(t, y) exp(t) * sin(y)
+
+rk4_step <- function(t, y, h) {
+  k1 <- f(t, y)
+  k2 <- f(t + h/2, y + h*k1/2)
+  k3 <- f(t + h/2, y + h*k2/2)
+  k4 <- f(t + h,   y + h*k3)
+  y + (h/6) * (k1 + 2*k2 + 2*k3 + k4)
+}
+
+# -----------------------------
+# Time grid: 0, 0.3, ..., 9.9, 10.0
+# -----------------------------
+times <- c(seq(0, 9.9, by = 0.3), 10)
+
+# -----------------------------
+# Function to run RK4 over 'times'
+# -----------------------------
+rk4_path <- function(y0, times) {
+  y <- numeric(length(times))
+  y[1] <- y0
+  for (i in 1:(length(times) - 1)) {
+    t <- times[i]
+    h <- times[i + 1] - times[i]   # 0.3 except last step 0.1
+    y[i + 1] <- rk4_step(t, y[i], h)
+  }
+  y
+}
+
+# -----------------------------
+# Compute 3 paths for 3 initial conditions
+# -----------------------------
+y_0300 <- rk4_path(0.300, times)
+y_0301 <- rk4_path(0.301, times)
+y_0302 <- rk4_path(0.302, times)
+
+# -----------------------------
+# Data frame with time + 3 columns
+# -----------------------------
+df <- data.frame(
+  time   = times,
+  y_0300 = y_0300,
+  y_0301 = y_0301,
+  y_0302 = y_0302
+)
+
+
+# Convert to long format without extra packages:
+df_long <- rbind(
+  data.frame(time = df$time, y = df$y_0300, IC = "y(0)=0.300"),
+  data.frame(time = df$time, y = df$y_0301, IC = "y(0)=0.301"),
+  data.frame(time = df$time, y = df$y_0302, IC = "y(0)=0.302")
+)
+
+ggplot(df_long, aes(x = time, y = y, color = IC)) +
+  geom_line(linewidth = 0.8) +
+  labs(
+    title = "RK4: y' = exp(t) * sin(y) (h=0.3; last step adjusted to reach t=10)",
+    x = "Time t",
+    y = "y(t)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+```
